@@ -1,0 +1,69 @@
+version: '3.7'
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    networks:
+      - local-kafka
+    ports:
+      - 29092:29092
+    environment:
+      - KAFKA_LISTENERS=EXTERNAL_SAME_HOST://0.0.0.0:29092,INTERNAL://0.0.0.0:9092,CONTROLLER://kafka:9093
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:9092,EXTERNAL_SAME_HOST://localhost:29092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=EXTERNAL_SAME_HOST:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_MIN_INSYNC_REPLICAS=1
+      - KAFKA_CLUSTER_ID=1
+      - KAFKA_BROKER_ID=1
+      - KAFKA_NODE_ID=1
+      - KAFKA_LOG4J_ROOT_LOGLEVEL=WARN
+      - KAFKA_TOOLS_LOG4J_LOGLEVEL=WARN
+      - KAFKA_LOG4J_LOGGERS=kafka.network.SocketServer=ERROR,org.apache.zookeeper=ERROR,org.apache.kafka=ERROR,kafka=ERROR,kafka.cluster=ERROR,kafka.controller=ERROR,kafka.coordinator=ERROR,kafka.log=ERROR,kafka.server=ERROR,kafka.zookeeper=ERROR,state.change.logger=ERROR,kafka.cluster.Partition=ERROR
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@KAFKA:9093
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - CLUSTER_ID=000000000-00000--00000
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: 1
+
+  init-kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - kafka
+    networks:
+      - local-kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      # Blocks until Kafka is reachable
+      kafka-topics --bootstrap-server kafka:9092 --list
+
+      echo -e 'Creating kafka topics'
+      #kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic topic.0 --replication-factor 1 --partitions 3
+      #kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic topic.1 --replication-factor 1 --partitions 3
+      #kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic topic.2 --replication-factor 1 --partitions 3
+      #kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic topic.3 --replication-factor 1 --partitions 3
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      
+      trap : TERM INT; sleep infinity & wait
+      "
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka
+    networks:
+      - local-kafka
+    ports:
+      - 8080:8080
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL=PLAINTEXT
+
+networks:
+  local-kafka:
