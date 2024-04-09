@@ -19,6 +19,7 @@ var adminClient = new AdminClientBuilder(new AdminClientConfig
     BootstrapServers = "localhost:29092"
 }).Build();
 
+// Deleting topics "topic.old" and "topic.new" so we can start afresh
 Console.WriteLine("Deleting topics \"topic.old\" and \"topic.new\" so we can start afresh");
 var metadata = adminClient.GetMetadata(TimeSpan.FromSeconds(10));
 await adminClient.DeleteTopicsAsync(
@@ -29,6 +30,7 @@ await adminClient.DeleteTopicsAsync(
         OperationTimeout = TimeSpan.FromMilliseconds(sessionTimeoutMilliseconds)
     });
 
+// Creating topics "topic.old" and "topic.new"
 Console.WriteLine("Creating topics \"topic.old\" and \"topic.new\"");
 await adminClient.CreateTopicsAsync(
     new TopicSpecification[]
@@ -54,59 +56,69 @@ await adminClient.CreateTopicsAsync(
 
 IConsumer<string, string>[] consumers;
 
+
+// Create our first round of consumers, which will have the group.instance.ids: kafka.consumer.0, kafka.consumer.1 and kafka.consumer.2
 consumers = Enumerable.Range(0, 3).Select(index => CreateConsumer(consumerConfig, index)).ToArray();
 
+// Subscribing to "topic.old"
 Console.WriteLine("Subscribing to \"topic.old\"");
 foreach (var consumer in consumers)
 {
     consumer.Subscribe("topic.old");
 }
 
+// [rdkafka#consumer-3] PARTITIONS ASSIGNED topic.old [[1]]
+// [rdkafka#consumer-2] PARTITIONS ASSIGNED topic.old [[0]]
+// [rdkafka#consumer-4] PARTITIONS ASSIGNED topic.old [[2]]
 using (var cts = new CancellationTokenSource())
 {
     cts.CancelAfter(2 * sessionTimeoutMilliseconds);
-
-    await Task.WhenAll(consumers.Select(
-        consumer => Task.Factory.StartNew(
-            () => ConsumeUntilCanceled(consumer, cts.Token),
-            TaskCreationOptions.LongRunning)));
+    await ConsumeAllUntilCanceled(consumers, cts.Token);
 }
 
+// Disposing consumers listening to "topic.old"
 Console.WriteLine("Disposing consumers listening to \"topic.old\"");
 foreach (var consumer in consumers)
 {
     consumer.Dispose();
 }
 
-// Wait for a short while in order to simulate a deployment.
+
+// Wait for a short while in order to simulate a deployment or an otherwise short period of downtime.
 await Task.Delay(sessionTimeoutMilliseconds / 2);
 
+
+// Create our first round of consumers, which will also have the group.instance.ids: kafka.consumer.0, kafka.consumer.1 and kafka.consumer.2
 consumers = Enumerable.Range(0, 3).Select(index => CreateConsumer(consumerConfig, index)).ToArray();
 
+// Subscribing to "topic.new"
 Console.WriteLine("Subscribing to \"topic.new\"");
 foreach (var consumer in consumers)
 {
     consumer.Subscribe("topic.new");
 }
 
+// !!! NOTE: We do not pick up any partitions from topic.new even though we subscribed to it !!!
+// [rdkafka#consumer-6] PARTITIONS ASSIGNED topic.old [[1]]
+// [rdkafka#consumer-7] PARTITIONS ASSIGNED topic.old [[2]]
+// [rdkafka#consumer-5] PARTITIONS ASSIGNED topic.old [[0]]
 using (var cts = new CancellationTokenSource())
 {
     cts.CancelAfter(2 * sessionTimeoutMilliseconds);
-
-    await Task.WhenAll(consumers.Select(
-        consumer => Task.Factory.StartNew(
-            () => ConsumeUntilCanceled(consumer, cts.Token),
-            TaskCreationOptions.LongRunning)));
+    await ConsumeAllUntilCanceled(consumers, cts.Token);
 }
 
+// Disposing consumers listening to "topic.new"
 Console.WriteLine("Disposing consumers listening to \"topic.new\"");
 foreach (var consumer in consumers)
 {
     consumer.Dispose();
 }
 
+return;
 
-IConsumer<string, string> CreateConsumer(ConsumerConfig baseConsumerConfig, int index)
+
+static IConsumer<string, string> CreateConsumer(ConsumerConfig baseConsumerConfig, int index)
     => new ConsumerBuilder<string, string>(new ConsumerConfig(baseConsumerConfig)
         {
             GroupInstanceId = $"kafka.consumer.{index}"
@@ -134,7 +146,13 @@ IConsumer<string, string> CreateConsumer(ConsumerConfig baseConsumerConfig, int 
         })
         .Build();
 
-void ConsumeUntilCanceled(IConsumer<string, string> consumer, CancellationToken cancellationToken)
+static async Task ConsumeAllUntilCanceled(IConsumer<string, string>[] consumers, CancellationToken cancellationToken)
+    => await Task.WhenAll(consumers.Select(
+        consumer => Task.Factory.StartNew(
+            () => ConsumeUntilCanceled(consumer, cancellationToken),
+            TaskCreationOptions.LongRunning)));
+
+static void ConsumeUntilCanceled(IConsumer<string, string> consumer, CancellationToken cancellationToken)
 {
     while (!cancellationToken.IsCancellationRequested)
     {
